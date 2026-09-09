@@ -29,3 +29,17 @@ def search_memories(query_embedding: list[float], top_k: int = TOP_K) -> list[di
         "match_count": top_k,
     }).execute()
     return result.data or []
+
+
+def get_state(key: str) -> str | None:
+    """Read a small persisted value (e.g. the last processed Telegram
+    update_id) — needed because GitHub Actions runs are stateless between
+    jobs, so this state has to live somewhere external."""
+    result = _client.table("bot_state").select("value").eq("key", key).execute()
+    if result.data:
+        return result.data[0]["value"]
+    return None
+
+
+def set_state(key: str, value: str) -> None:
+    _client.table("bot_state").upsert({"key": key, "value": value}).execute()

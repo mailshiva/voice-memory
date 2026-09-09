@@ -42,6 +42,14 @@ as $$
   limit match_count;
 $$;
 
+-- 5. Small key/value table used only by the GitHub Actions one-shot poller
+-- (poll_once.py), to remember the last processed Telegram update_id across
+-- separate, stateless job runs.
+create table if not exists bot_state (
+  key text primary key,
+  value text not null
+);
+
 -- RLS is enabled by default when you create this table through the SQL
 -- editor dialog. That's expected and fine — the bot connects with the
 -- service_role key, which bypasses RLS entirely, so no policies are needed.

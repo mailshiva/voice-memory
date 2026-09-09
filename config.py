@@ -1,31 +1,34 @@
 import os
+import sys
 from dotenv import load_dotenv
 
 try:
-    import keyring  # only meaningfully available on your Mac
+    import keyring  # only usable on macOS — see _get_secret below
 except ImportError:
     keyring = None
 
 load_dotenv()
 
 KEYRING_SERVICE = "voice-memory-bot"
+IS_MACOS = sys.platform == "darwin"
 
 
 def _get_secret(name: str, env_var: str) -> str:
-    """Look up a secret from macOS Keychain first (via `keyring`), then fall
-    back to an environment variable / .env entry. Keychain won't exist on a
-    Linux cloud server, so that fallback is what a cloud deployment uses."""
-    if keyring is not None:
-        value = keyring.get_password(KEYRING_SERVICE, name)
-        if value:
-            return value
+    """On macOS, look up the secret in Keychain via `keyring`. On any other
+    platform (e.g. a Linux cloud VM, which has no Keychain), skip straight
+    to an environment variable / .env entry instead."""
+    if IS_MACOS and keyring is not None:
+        try:
+            value = keyring.get_password(KEYRING_SERVICE, name)
+            if value:
+                return value
+        except Exception:
+            pass  # no Keychain daemon reachable, etc. — fall through to env
 
     value = os.environ.get(env_var)
     if not value:
-        raise RuntimeError(
-            f"Missing secret '{name}'. Either store it in Keychain "
-            f"(see README.md) or set {env_var} in your environment/.env file."
-        )
+        source = "Keychain or .env" if IS_MACOS else ".env / environment variables"
+        raise RuntimeError(f"Missing secret '{name}'. Set it via {source}.")
     return value
 
 
