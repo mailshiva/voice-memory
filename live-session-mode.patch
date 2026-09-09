@@ -1,0 +1,249 @@
+diff --git a/.github/workflows/live-session.yml b/.github/workflows/live-session.yml
+new file mode 100644
+index 0000000..80df78e
+--- /dev/null
++++ b/.github/workflows/live-session.yml
+@@ -0,0 +1,42 @@
++name: Live session (voice memory bot)
++
++on:
++  # Trigger right before you start asking questions, for a stretch of
++  # near-instant back-and-forth instead of waiting for the next scheduled
++  # poll.yml tick. Runs live_session.py, which long-polls Telegram in a
++  # loop for `duration_minutes` and then exits back to the normal schedule.
++  workflow_dispatch:
++    inputs:
++      duration_minutes:
++        description: "Minutes to stay actively listening"
++        required: false
++        default: "15"
++        type: number
++
++permissions:
++  contents: read
++  packages: read
++
++jobs:
++  live-session:
++    runs-on: ubuntu-latest
++    # A few minutes of buffer on top of the requested duration for
++    # container start-up and a clean shutdown, so the job's own deadline
++    # (in live_session.py) is what normally ends the run, not this hard cap.
++    timeout-minutes: ${{ fromJSON(inputs.duration_minutes) + 5 }}
++    container:
++      image: ghcr.io/${{ github.repository }}:latest
++      credentials:
++        username: ${{ github.actor }}
++        password: ${{ secrets.GITHUB_TOKEN }}
++    steps:
++      - name: Run live polling session
++        working-directory: /app
++        env:
++          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
++          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
++          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
++          WHISPER_MODEL: tiny
++          DURATION_MINUTES: ${{ inputs.duration_minutes }}
++        run: python live_session.py
+diff --git a/README.md b/README.md
+index e493e29..865a221 100644
+--- a/README.md
++++ b/README.md
+@@ -383,6 +383,24 @@ access token — this makes it possible to set up an iOS Shortcut (or
+ Android equivalent) that triggers a run with one tap/Siri phrase, without
+ opening the GitHub app at all. Ask if you want help setting that up.
+ 
++**Live session mode, for a burst of near-instant replies:** `poll.yml`'s
++schedule closes the gap to "within N minutes," but each run still only
++processes one poll's worth of messages. For a stretch of actual
++back-and-forth (asking a question, then a follow-up a few seconds later),
++trigger **Actions → "Live session (voice memory bot)" → Run workflow**
++instead. It runs `live_session.py`, which long-polls Telegram in a loop —
++processing anything new every few seconds — for `duration_minutes`
++(default 15) before exiting back to the normal schedule.
++
++While a live session is running, it holds a lock (a timestamp in the same
++`bot_state` table used for the offset) that `poll_once.py` checks first and
++skips itself if the lock hasn't expired — otherwise both processes would
++try to hold Telegram's `getUpdates` connection at once, which Telegram
++rejects with a `Conflict` error. The lock releases itself as soon as the
++session ends (or, worst case, expires on its own a little after the
++requested duration), so there's no way to leave the bot stuck refusing to
++poll.
++
+ ## Keeping the Supabase free project awake
+ 
+ Free Supabase projects pause after 7 days with no API activity. If you don't
+diff --git a/live_session.py b/live_session.py
+new file mode 100644
+index 0000000..7c868f5
+--- /dev/null
++++ b/live_session.py
+@@ -0,0 +1,125 @@
++import asyncio
++import os
++import time
++from datetime import datetime, timedelta, timezone
++
++from telegram import Bot
++
++from config import TELEGRAM_BOT_TOKEN
++from db import get_state, set_state
++from core import HELP_TEXT, process_voice, process_text, process_mem_command
++
++STATE_KEY = "last_update_id"
++
++# Shared with poll_once.py: while this holds a future UTC timestamp,
++# poll_once.py skips its run instead of opening a second concurrent
++# get_updates connection (Telegram allows only one per bot token and
++# answers the second with a 409 Conflict).
++SESSION_LOCK_KEY = "live_session_until"
++
++# Telegram long-poll timeout per get_updates call, in seconds. The HTTP
++# client's own read timeout is set a bit higher than this (see
++# _get_updates below) so it never gives up before Telegram's long-poll
++# wait itself would return.
++POLL_TIMEOUT_SECONDS = 25
++
++# Safety margin added on top of the requested duration when claiming the
++# lock, so a slightly slow shutdown here doesn't let a scheduled poll_once
++# run sneak in a moment early.
++LOCK_MARGIN_SECONDS = 30
++
++
++def _duration_minutes() -> float:
++    raw = os.environ.get("DURATION_MINUTES", "15")
++    try:
++        value = float(raw)
++    except ValueError:
++        return 15.0
++    return value if value > 0 else 15.0
++
++
++async def _handle_update(bot: Bot, update) -> None:
++    message = update.message
++    if message is not None:
++        chat_id = message.chat_id
++
++        if message.voice:
++            await process_voice(bot, chat_id, message.voice.file_id)
++        elif message.text:
++            text = message.text.strip()
++            if text == "/start":
++                await bot.send_message(chat_id=chat_id, text=HELP_TEXT)
++            elif text.startswith("/mem"):
++                await process_mem_command(bot, chat_id, text)
++            else:
++                await process_text(bot, chat_id, text)
++
++    # Advance the stored offset even for update types we don't act on, so
++    # they aren't re-fetched (and re-attempted) on a later run.
++    set_state(STATE_KEY, str(update.update_id))
++
++
++async def _get_updates(bot: Bot, offset, poll_timeout: int):
++    # get_updates(timeout=...) tells Telegram how long to hold the request
++    # open waiting for a new message. python-telegram-bot's own HTTP read
++    # timeout defaults to a few seconds, which is shorter than our 25s
++    # long-poll — without bumping it explicitly, the client would raise a
++    # read timeout before Telegram ever gets to respond.
++    return await bot.get_updates(
++        offset=offset,
++        timeout=poll_timeout,
++        read_timeout=poll_timeout + 5,
++    )
++
++
++async def main() -> None:
++    duration = _duration_minutes()
++    deadline = time.monotonic() + duration * 60
++
++    lock_until = datetime.now(timezone.utc) + timedelta(
++        minutes=duration, seconds=LOCK_MARGIN_SECONDS
++    )
++    set_state(SESSION_LOCK_KEY, lock_until.strftime("%Y-%m-%dT%H:%M:%SZ"))
++
++    print(f"Live session started — listening for up to {duration:.0f} minute(s).")
++
++    bot = Bot(token=TELEGRAM_BOT_TOKEN)
++
++    try:
++        last_id = get_state(STATE_KEY)
++        offset = int(last_id) + 1 if last_id else None
++
++        while True:
++            remaining = deadline - time.monotonic()
++            if remaining <= 1:
++                break
++
++            poll_timeout = max(1, min(POLL_TIMEOUT_SECONDS, int(remaining)))
++
++            try:
++                updates = await _get_updates(bot, offset, poll_timeout)
++            except Exception as exc:
++                # A transient network/Telegram hiccup shouldn't end the
++                # whole session — log it and keep listening.
++                print(f"get_updates error: {exc!r} — retrying")
++                await asyncio.sleep(2)
++                continue
++
++            for update in updates:
++                await _handle_update(bot, update)
++                offset = update.update_id + 1
++
++            if updates:
++                print(f"Processed {len(updates)} update(s).")
++
++        print("Live session window elapsed — shutting down.")
++
++    finally:
++        # Release the lock immediately rather than waiting for it to
++        # expire on its own, so the regular schedule (or a manual
++        # workflow_dispatch of poll.yml) can resume right away.
++        set_state(SESSION_LOCK_KEY, "")
++
++
++if __name__ == "__main__":
++    asyncio.run(main())
+diff --git a/poll_once.py b/poll_once.py
+index 90075a0..2b5b4a9 100644
+--- a/poll_once.py
++++ b/poll_once.py
+@@ -1,4 +1,5 @@
+ import asyncio
++from datetime import datetime, timezone
+ 
+ from telegram import Bot
+ 
+@@ -8,8 +9,30 @@ from core import HELP_TEXT, process_voice, process_text, process_mem_command
+ 
+ STATE_KEY = "last_update_id"
+ 
++# Set by live_session.py while it holds Telegram's get_updates connection
++# open for an extended burst. Telegram only allows one get_updates caller
++# per bot token at a time, so this run needs to skip rather than race it.
++SESSION_LOCK_KEY = "live_session_until"
++
++
++def _live_session_active() -> bool:
++    until = get_state(SESSION_LOCK_KEY)
++    if not until:
++        return False
++    try:
++        until_dt = datetime.strptime(until, "%Y-%m-%dT%H:%M:%SZ").replace(
++            tzinfo=timezone.utc
++        )
++    except ValueError:
++        return False
++    return datetime.now(timezone.utc) < until_dt
++
+ 
+ async def main() -> None:
++    if _live_session_active():
++        print("A live session is currently active — skipping this run.")
++        return
++
+     bot = Bot(token=TELEGRAM_BOT_TOKEN)
+ 
+     last_id = get_state(STATE_KEY)

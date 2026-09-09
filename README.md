@@ -383,6 +383,24 @@ access token — this makes it possible to set up an iOS Shortcut (or
 Android equivalent) that triggers a run with one tap/Siri phrase, without
 opening the GitHub app at all. Ask if you want help setting that up.
 
+**Live session mode, for a burst of near-instant replies:** `poll.yml`'s
+schedule closes the gap to "within N minutes," but each run still only
+processes one poll's worth of messages. For a stretch of actual
+back-and-forth (asking a question, then a follow-up a few seconds later),
+trigger **Actions → "Live session (voice memory bot)" → Run workflow**
+instead. It runs `live_session.py`, which long-polls Telegram in a loop —
+processing anything new every few seconds — for `duration_minutes`
+(default 15) before exiting back to the normal schedule.
+
+While a live session is running, it holds a lock (a timestamp in the same
+`bot_state` table used for the offset) that `poll_once.py` checks first and
+skips itself if the lock hasn't expired — otherwise both processes would
+try to hold Telegram's `getUpdates` connection at once, which Telegram
+rejects with a `Conflict` error. The lock releases itself as soon as the
+session ends (or, worst case, expires on its own a little after the
+requested duration), so there's no way to leave the bot stuck refusing to
+poll.
+
 ## Keeping the Supabase free project awake
 
 Free Supabase projects pause after 7 days with no API activity. If you don't

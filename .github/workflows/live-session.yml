@@ -1,0 +1,42 @@
+name: Live session (voice memory bot)
+
+on:
+  # Trigger right before you start asking questions, for a stretch of
+  # near-instant back-and-forth instead of waiting for the next scheduled
+  # poll.yml tick. Runs live_session.py, which long-polls Telegram in a
+  # loop for `duration_minutes` and then exits back to the normal schedule.
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: "Minutes to stay actively listening"
+        required: false
+        default: "15"
+        type: number
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  live-session:
+    runs-on: ubuntu-latest
+    # A few minutes of buffer on top of the requested duration for
+    # container start-up and a clean shutdown, so the job's own deadline
+    # (in live_session.py) is what normally ends the run, not this hard cap.
+    timeout-minutes: ${{ fromJSON(inputs.duration_minutes) + 5 }}
+    container:
+      image: ghcr.io/${{ github.repository }}:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Run live polling session
+        working-directory: /app
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          WHISPER_MODEL: tiny
+          DURATION_MINUTES: ${{ inputs.duration_minutes }}
+        run: python live_session.py

@@ -5,22 +5,22 @@ on:
   # mobile app) whenever you want an immediate check for new messages.
   workflow_dispatch:
 
-  # Optional automatic trigger — runs every 15 minutes. Delete this whole
-  # `schedule:` block if you only want manual triggering (matches "run it
-  # when I need it" most literally, and costs zero Actions minutes when
-  # idle). Keep it if you want closer-to-live behavior. See README.md for
-  # the cost/frequency trade-off between a public and private repo.
-  
+  # Optional automatic trigger — see the schedule below for the current
+  # cadence. Delete this whole `schedule:` block if you only want manual
+  # triggering (matches "run it when I need it" most literally, and costs
+  # zero Actions minutes when idle). Keep it if you want closer-to-live
+  # behavior. See README.md for the cost/frequency trade-off between a
+  # public and private repo.
+
   schedule:
-    # Every 20 min, 6:00 AM–10:00 PM America/Chicago (currently CDT, UTC-5).
-    # GitHub Actions cron is UTC-only: 11:00-23:40 and 00:00-02:40 UTC covers
-    # 6:00 AM-9:40 PM local, plus one more run at 03:00 UTC for the 10:00 PM
-    # local slot.
+    # Once an hour, on the hour, 6:00 AM–10:00 PM America/Chicago (currently
+    # CDT, UTC-5). GitHub Actions cron is UTC-only: local 6:00-22:00 maps to
+    # UTC hours 11-23 and 0-3 (the wrap past midnight covers local 19:00
+    # onward).
     # NOTE: when US DST ends (Sun Nov 1, 2026) Chicago moves to CST (UTC-6)
     # and this same UTC schedule will fire an hour earlier locally
     # (5:00 AM-9:00 PM) until these hours are shifted back by one.
-    - cron: "*/20 11-23,0-2 * * *"
-    - cron: "0 3 * * *"
+    - cron: "0 11-23,0-3 * * *"
 
 permissions:
   contents: read

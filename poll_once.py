@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 
 from telegram import Bot
 
@@ -8,8 +9,30 @@ from core import HELP_TEXT, process_voice, process_text, process_mem_command
 
 STATE_KEY = "last_update_id"
 
+# Set by live_session.py while it holds Telegram's get_updates connection
+# open for an extended burst. Telegram only allows one get_updates caller
+# per bot token at a time, so this run needs to skip rather than race it.
+SESSION_LOCK_KEY = "live_session_until"
+
+
+def _live_session_active() -> bool:
+    until = get_state(SESSION_LOCK_KEY)
+    if not until:
+        return False
+    try:
+        until_dt = datetime.strptime(until, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return False
+    return datetime.now(timezone.utc) < until_dt
+
 
 async def main() -> None:
+    if _live_session_active():
+        print("A live session is currently active — skipping this run.")
+        return
+
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
     last_id = get_state(STATE_KEY)
