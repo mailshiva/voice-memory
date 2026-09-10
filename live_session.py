@@ -43,19 +43,35 @@ async def _handle_update(bot: Bot, update) -> None:
     if message is not None:
         chat_id = message.chat_id
 
-        if message.voice:
-            await process_voice(bot, chat_id, message.voice.file_id)
-        elif message.text:
-            text = message.text.strip()
-            if text == "/start":
-                await bot.send_message(chat_id=chat_id, text=HELP_TEXT)
-            elif text.startswith("/mem"):
-                await process_mem_command(bot, chat_id, text)
-            else:
-                await process_text(bot, chat_id, text)
+        try:
+            if message.voice:
+                await process_voice(bot, chat_id, message.voice.file_id)
+            elif message.text:
+                text = message.text.strip()
+                if text == "/start":
+                    await bot.send_message(chat_id=chat_id, text=HELP_TEXT)
+                elif text.startswith("/mem"):
+                    await process_mem_command(bot, chat_id, text)
+                else:
+                    await process_text(bot, chat_id, text)
+        except Exception as exc:
+            # This is exactly what crashed the session before: one bad
+            # message (e.g. an empty LLM response) propagating up and
+            # ending the whole live_session.py run early — and, since
+            # set_state below would then be skipped too, getting
+            # re-fetched and re-failed by every future run forever. Log
+            # it, tell the user, and keep listening instead.
+            print(f"Error processing update {update.update_id}: {exc!r}")
+            try:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text="Sorry, something went wrong processing that — try again?",
+                )
+            except Exception:
+                pass  # best-effort notification only
 
-    # Advance the stored offset even for update types we don't act on, so
-    # they aren't re-fetched (and re-attempted) on a later run.
+    # Advance the stored offset even for update types we don't act on (or
+    # ones that errored above), so they aren't re-fetched next time.
     set_state(STATE_KEY, str(update.update_id))
 
 

@@ -51,19 +51,35 @@ async def main() -> None:
         if message is not None:
             chat_id = message.chat_id
 
-            if message.voice:
-                await process_voice(bot, chat_id, message.voice.file_id)
-            elif message.text:
-                text = message.text.strip()
-                if text == "/start":
-                    await bot.send_message(chat_id=chat_id, text=HELP_TEXT)
-                elif text.startswith("/mem"):
-                    await process_mem_command(bot, chat_id, text)
-                else:
-                    await process_text(bot, chat_id, text)
+            try:
+                if message.voice:
+                    await process_voice(bot, chat_id, message.voice.file_id)
+                elif message.text:
+                    text = message.text.strip()
+                    if text == "/start":
+                        await bot.send_message(chat_id=chat_id, text=HELP_TEXT)
+                    elif text.startswith("/mem"):
+                        await process_mem_command(bot, chat_id, text)
+                    else:
+                        await process_text(bot, chat_id, text)
+            except Exception as exc:
+                # Without this, an error here (a bad LLM response, a
+                # Supabase hiccup, etc.) would skip set_state below, and
+                # the *same* update would be re-fetched — and re-fail — on
+                # every future scheduled run forever, permanently stuck.
+                # Log it, tell the user, and move on instead.
+                print(f"Error processing update {update.update_id}: {exc!r}")
+                try:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text="Sorry, something went wrong processing that — try again?",
+                    )
+                except Exception:
+                    pass  # best-effort notification only
 
-        # Advance the stored offset even for update types we don't act on,
-        # so they aren't re-fetched (and re-attempted) on the next run.
+        # Advance the stored offset even for update types we don't act on
+        # (or ones that errored above), so they aren't re-fetched — and
+        # re-failed — on the next run.
         set_state(STATE_KEY, str(update.update_id))
 
     print(f"Processed {len(updates)} update(s).")
