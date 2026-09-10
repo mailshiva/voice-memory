@@ -20,10 +20,14 @@ permissions:
 jobs:
   live-session:
     runs-on: ubuntu-latest
-    # A few minutes of buffer on top of the requested duration for
-    # container start-up and a clean shutdown, so the job's own deadline
-    # (in live_session.py) is what normally ends the run, not this hard cap.
-    timeout-minutes: ${{ fromJSON(inputs.duration_minutes) + 5 }}
+    # A fixed backstop, not the actual duration control — that's
+    # DURATION_MINUTES below, enforced by live_session.py's own internal
+    # deadline. This just guarantees the job can't hang forever if
+    # something goes wrong. GitHub Actions expressions don't support
+    # arithmetic (no `+`), so this can't be computed as "duration + 5" —
+    # if you ever dispatch with a duration_minutes above ~55, raise this
+    # number to match.
+    timeout-minutes: 60
     container:
       image: ghcr.io/${{ github.repository }}:latest
       credentials:
