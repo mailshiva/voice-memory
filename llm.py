@@ -30,15 +30,25 @@ def answer_question(question: str, memories: list[dict]) -> str:
         temperature=0.2,
         # gpt-oss is a reasoning model — it spends tokens on a hidden
         # "thinking" pass before writing the visible answer. The previous
-        # max_tokens=500 (deprecated name, too low a budget) let long
-        # reasoning eat the whole allowance, leaving zero tokens for the
-        # actual answer and producing an empty response — which Telegram's
-        # API then rejects outright when it's sent as a message. Low
-        # reasoning_effort keeps this a quick retrieval-QA task rather than
-        # deep reasoning, so more of the (now larger) budget goes to the
-        # actual answer.
-        max_completion_tokens=1024,
-        reasoning_effort="low",
+        # max_tokens=500 was too small a budget: long reasoning could eat
+        # the whole allowance, leaving zero tokens for the actual answer
+        # and producing an empty response — which Telegram's API then
+        # rejects outright when it's sent as a message.
+        #
+        # NOTE: the pinned `groq==0.9.0` SDK predates both
+        # `max_completion_tokens` and a typed `reasoning_effort` parameter
+        # (its create() has a fixed argument list, no **kwargs passthrough
+        # — passing either by name raises a TypeError on every call, which
+        # is what actually broke every question after the first attempt at
+        # this fix). `max_tokens` is the one this SDK version still
+        # supports directly; `reasoning_effort` is instead smuggled into
+        # the raw request body via `extra_body`, which this SDK does
+        # support and which Groq's API (server-side, independent of SDK
+        # version) accepts as a real field for gpt-oss models — low effort
+        # keeps this a quick retrieval-QA task rather than deep reasoning,
+        # leaving more of the budget for the actual answer.
+        max_tokens=1024,
+        extra_body={"reasoning_effort": "low"},
     )
     content = (response.choices[0].message.content or "").strip()
     if not content:
