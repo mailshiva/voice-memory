@@ -22,6 +22,24 @@ def delete_memory(memory_id: int) -> bool:
     return bool(result.data)
 
 
+def get_memory(memory_id: int) -> dict | None:
+    """Fetch a single memory by id. Returns None if it doesn't exist."""
+    result = _client.table("memories").select("id, content").eq("id", memory_id).execute()
+    if result.data:
+        return result.data[0]
+    return None
+
+
+def update_memory(memory_id: int, content: str, embedding: list[float]) -> bool:
+    """Overwrite a memory's content and embedding (e.g. after fixing a
+    transcription typo). Returns True if a row was actually updated."""
+    result = _client.table("memories").update({
+        "content": content,
+        "embedding": embedding,
+    }).eq("id", memory_id).execute()
+    return bool(result.data)
+
+
 def search_memories(query_embedding: list[float], top_k: int = TOP_K) -> list[dict]:
     """Return the top_k most semantically similar memories via the match_memories RPC."""
     result = _client.rpc("match_memories", {

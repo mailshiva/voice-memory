@@ -8,7 +8,7 @@ from telegram.ext import (
 )
 
 from config import TELEGRAM_BOT_TOKEN
-from core import HELP_TEXT, process_voice, process_text, process_mem_command
+from core import HELP_TEXT, process_voice, process_text, process_mem_command, process_upd_command
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -21,6 +21,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def handle_mem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await process_mem_command(context.bot, update.effective_chat.id, update.message.text)
+
+
+async def handle_upd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await process_upd_command(context.bot, update.effective_chat.id, update.message.text)
 
 
 async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -43,6 +47,7 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("mem", handle_mem))
+    app.add_handler(CommandHandler("upd", handle_upd))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_question))
 

@@ -7,7 +7,7 @@ from telegram import Bot
 
 from config import TELEGRAM_BOT_TOKEN
 from db import get_state, set_state
-from core import HELP_TEXT, process_voice, process_text, process_mem_command
+from core import HELP_TEXT, process_voice, process_text, process_mem_command, process_upd_command
 
 STATE_KEY = "last_update_id"
 
@@ -52,6 +52,8 @@ async def _handle_update(bot: Bot, update) -> None:
                     await bot.send_message(chat_id=chat_id, text=HELP_TEXT)
                 elif text.startswith("/mem"):
                     await process_mem_command(bot, chat_id, text)
+                elif text.startswith("/upd"):
+                    await process_upd_command(bot, chat_id, text)
                 else:
                     await process_text(bot, chat_id, text)
         except Exception as exc:
