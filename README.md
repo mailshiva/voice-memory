@@ -68,6 +68,14 @@ python bot.py
 - Say or type **"erase 101"** or **"erase id 101"** → deletes that memory by
   id. Works both as a voice note (Whisper transcribes it, the bot recognizes
   the erase pattern) and as typed text.
+- Type `/upd <id> <wrong text>: <correct text>` → fixes a transcription typo
+  in an already-saved memory, e.g. `/upd 101 said: side`. Every occurrence
+  of the given text is replaced, so add a surrounding word or two (e.g.
+  `/upd 101 said hello: side hello`) if the typo'd word appears more than
+  once and you only mean one spot. The memory's embedding is regenerated
+  after the fix, so search stays accurate. Typed only — not recognized in
+  voice notes, since the exact wording and colon it depends on are exactly
+  what Whisper tends to garble.
 - In a **voice note**, start with the word **"question"** to ask instead of
   save — e.g. "question, where did I park the car?" The bot strips the
   "question" prefix and treats the rest as a search query instead of a new

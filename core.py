@@ -4,7 +4,7 @@ import tempfile
 
 from stt import transcribe
 from embeddings import embed
-from db import store_memory, search_memories, delete_memory
+from db import store_memory, search_memories, delete_memory, get_memory, update_memory
 from llm import answer_question
 
 
@@ -14,6 +14,13 @@ HELP_TEXT = (
     "/mem Paid the electrician $200 on July 8th\n\n"
     "Every saved memory gets shown with an id number. To erase one, say or "
     "type \"erase 101\" or \"erase id 101\".\n\n"
+    "To fix a transcription typo, type /upd <id> <wrong text>: <correct "
+    "text>, e.g.\n"
+    "/upd 101 said: side\n"
+    "If that text appears more than once in the memory, every occurrence "
+    "gets replaced — add a surrounding word or two to target just one "
+    "occurrence, e.g. /upd 101 said hello: side hello. Typed only, not "
+    "supported via voice.\n\n"
     "Any other text message is treated as a question, and I'll search your "
     "memories to answer it. In a voice note, start with the word "
     "\"question\" to ask instead of save, e.g. \"question, where did I park "
@@ -28,6 +35,18 @@ ERASE_PATTERN = re.compile(r"^\s*erase\s+(?:id\s+)?(\d+)\s*[.!]?\s*$", re.IGNORE
 # "question, where did I park?" or "question where did I park".
 QUESTION_PREFIX_PATTERN = re.compile(r"^\s*question\b[,:]?\s*", re.IGNORECASE)
 
+# Matches the part of an "/upd ..." command after the "/upd" prefix has
+# already been stripped, e.g. "101 said: side" or
+# "id 101 said hello: side hello". Group 1 is the memory id, group 2 the
+# text to find (everything up to the last colon), group 3 the replacement
+# text. Typed only — never matched against voice transcriptions, since the
+# colon and exact wording it depends on are exactly what Whisper tends to
+# mangle.
+UPDATE_PATTERN = re.compile(
+    r"^\s*(?:id\s+)?(\d+)\s+(.+?)\s*:\s*(.+?)\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 async def save_memory(bot, chat_id: int, text: str, source: str) -> None:
     vector = embed(text)
@@ -41,6 +60,50 @@ async def erase_memory(bot, chat_id: int, memory_id: int) -> None:
         await bot.send_message(chat_id=chat_id, text=f"Erased memory {memory_id}.")
     else:
         await bot.send_message(chat_id=chat_id, text=f"No memory found with id {memory_id}.")
+
+
+async def update_memory_text(bot, chat_id: int, memory_id: int, old_text: str, new_text: str) -> None:
+    memory = get_memory(memory_id)
+    if memory is None:
+        await bot.send_message(chat_id=chat_id, text=f"No memory found with id {memory_id}.")
+        return
+
+    find_pattern = re.compile(re.escape(old_text), re.IGNORECASE)
+    new_content, count = find_pattern.subn(new_text, memory["content"])
+
+    if count == 0:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"Memory {memory_id} doesn't contain \"{old_text}\" — nothing changed.",
+        )
+        return
+
+    vector = embed(new_content)
+    update_memory(memory_id, new_content, vector)
+    times = "1 occurrence" if count == 1 else f"{count} occurrences"
+    await bot.send_message(
+        chat_id=chat_id,
+        text=f"Updated (id {memory_id}, {times} replaced): \"{new_content}\"",
+    )
+
+
+async def process_upd_command(bot, chat_id: int, text: str) -> None:
+    content = text.removeprefix("/upd").strip()
+    match = UPDATE_PATTERN.match(content)
+    if not match:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "Usage: /upd <id> <wrong text>: <correct text>\n"
+                "e.g. /upd 101 said: side"
+            ),
+        )
+        return
+
+    memory_id = int(match.group(1))
+    old_text = match.group(2)
+    new_text = match.group(3)
+    await update_memory_text(bot, chat_id, memory_id, old_text, new_text)
 
 
 async def answer(bot, chat_id: int, question: str) -> None:
