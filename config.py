@@ -42,3 +42,10 @@ EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 
 # How many past memories to retrieve per question
 TOP_K = 5
+
+# This is a single-user personal bot, so the one user's timezone is just
+# hardcoded rather than made configurable per-chat. Used to resolve
+# relative-date language in photo captions/content (e.g. a birthday-wish
+# screenshot implying "today") against the day it actually was for the
+# user, not the UTC day Telegram's message timestamp falls on.
+USER_TIMEZONE = "America/Chicago"

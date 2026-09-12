@@ -76,6 +76,20 @@ python bot.py
   after the fix, so search stays accurate. Typed only — not recognized in
   voice notes, since the exact wording and colon it depends on are exactly
   what Whisper tends to garble.
+- Send a **photo** of anything with text in it (an invite, a sign, a
+  screenshot) → a Groq vision model reads the text and saves it as a
+  memory, e.g. `Saved (id 102): "..."`. No caption needed — an uncaptioned
+  photo is saved as the text read from it, as-is. Add a caption and it's
+  no longer just stapled on: a second Groq call reads the caption
+  alongside the photo's text and writes the actual memory, so an
+  instruction like "store the b'day, boy's name, and whose son he is" on
+  a screenshot of birthday wishes for "Dhanwin" from "Smitha" produces
+  something like `"Smitha's son Dhanwin's birthday is September 12"` —
+  resolving "today"/"many happy returns" against the date the photo was
+  actually sent, not left vague. A plain caption like "remember this"
+  still degrades gracefully to roughly the old behavior (the photo's text,
+  with the caption kept as a short prefix). If no legible text is found in
+  the image, nothing is saved and the bot says so.
 - In a **voice note**, start with the word **"question"** to ask instead of
   save — e.g. "question, where did I park the car?" The bot strips the
   "question" prefix and treats the rest as a search query instead of a new
