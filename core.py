@@ -4,8 +4,9 @@ import tempfile
 
 from stt import transcribe
 from embeddings import embed
+from vision import extract_text as extract_image_text
 from db import store_memory, search_memories, delete_memory, get_memory, update_memory
-from llm import answer_question
+from llm import answer_question, compose_photo_memory
 
 
 HELP_TEXT = (
@@ -21,6 +22,9 @@ HELP_TEXT = (
     "gets replaced — add a surrounding word or two to target just one "
     "occurrence, e.g. /upd 101 said hello: side hello. Typed only, not "
     "supported via voice.\n\n"
+    "Send a photo of anything with text in it (an invite, a sign, a note) "
+    "and I'll read and save it. Add a caption for context, e.g. \"remember "
+    "this\" — the caption is kept alongside the text I read.\n\n"
     "Any other text message is treated as a question, and I'll search your "
     "memories to answer it. In a voice note, start with the word "
     "\"question\" to ask instead of save, e.g. \"question, where did I park "
@@ -140,6 +144,38 @@ async def _download_and_transcribe(bot, file_id: str) -> str:
         return transcribe(audio_path)
     finally:
         os.remove(audio_path)
+
+
+async def _download_photo(bot, file_id: str) -> str:
+    tg_file = await bot.get_file(file_id)
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        await tg_file.download_to_drive(tmp.name)
+        return tmp.name
+
+
+async def process_photo(bot, chat_id: int, file_id: str, caption: str | None, sent_at=None) -> None:
+    image_path = await _download_photo(bot, file_id)
+    try:
+        extracted = extract_image_text(image_path)
+    finally:
+        os.remove(image_path)
+
+    if not extracted:
+        await bot.send_message(chat_id=chat_id, text="Couldn't find any readable text in that photo.")
+        return
+
+    caption = (caption or "").strip()
+    if caption:
+        # An LLM pass rather than a plain prefix, so a real instruction in
+        # the caption ("store the b'day, boy's name, and whose son he is")
+        # actually gets followed, not just stapled onto the raw OCR text —
+        # while a plain note caption ("remember this") still degrades
+        # gracefully to something close to the old behavior (see the
+        # fallback and prompt in compose_photo_memory).
+        content = compose_photo_memory(caption, extracted, sent_at)
+    else:
+        content = extracted
+    await save_memory(bot, chat_id, content, source="photo")
 
 
 async def process_voice(bot, chat_id: int, file_id: str) -> None:

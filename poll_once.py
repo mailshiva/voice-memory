@@ -5,7 +5,7 @@ from telegram import Bot
 
 from config import TELEGRAM_BOT_TOKEN
 from db import get_state, set_state
-from core import HELP_TEXT, process_voice, process_text, process_mem_command, process_upd_command
+from core import HELP_TEXT, process_voice, process_photo, process_text, process_mem_command, process_upd_command
 
 STATE_KEY = "last_update_id"
 
@@ -52,7 +52,9 @@ async def main() -> None:
             chat_id = message.chat_id
 
             try:
-                if message.voice:
+                if message.photo:
+                    await process_photo(bot, chat_id, message.photo[-1].file_id, message.caption, message.date)
+                elif message.voice:
                     await process_voice(bot, chat_id, message.voice.file_id)
                 elif message.text:
                     text = message.text.strip()
